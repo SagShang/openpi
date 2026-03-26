@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import re
 import shutil
+from typing import Literal
 
 import h5py
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
@@ -35,7 +36,19 @@ def decode_image(buffer: np.bytes_) -> np.ndarray:
     return np.asarray(image, dtype=np.uint8).transpose(2, 0, 1)
 
 
-def load_prompt(raw_dir: Path, episode_id: int) -> str:
+def sample_prompt(candidates: list[str], rng: np.random.Generator) -> str:
+    if not candidates:
+        raise ValueError("Prompt candidate list is empty")
+    return str(rng.choice(candidates))
+
+
+def load_prompt(
+    raw_dir: Path,
+    episode_id: int,
+    rng: np.random.Generator,
+    *,
+    prompt_source: Literal["seen", "unseen", "instructions", "auto"] = "seen",
+) -> str:
     instruction_path = raw_dir / "instructions" / f"episode{episode_id}.json"
     if not instruction_path.exists():
         return raw_dir.name.replace("_", " ")
@@ -46,12 +59,22 @@ def load_prompt(raw_dir: Path, episode_id: int) -> str:
     if isinstance(instruction, str):
         return instruction
     if isinstance(instruction, list) and instruction:
-        return instruction[0]
+        return sample_prompt(instruction, rng)
     if isinstance(instruction, dict):
-        for key in ("seen", "unseen"):
+        if prompt_source == "auto":
+            candidate_keys = ("instructions", "seen", "unseen")
+        elif prompt_source == "seen":
+            # RoboTwin official training keeps only seen instructions, then samples one per episode.
+            candidate_keys = ("seen", "instructions")
+        else:
+            candidate_keys = (prompt_source,)
+
+        for key in candidate_keys:
             values = instruction.get(key)
-            if values:
-                return values[0]
+            if isinstance(values, list) and values:
+                return sample_prompt(values, rng)
+            if isinstance(values, str):
+                return values
 
     return raw_dir.name.replace("_", " ")
 
@@ -98,8 +121,15 @@ def create_dataset(output_dir: Path, repo_id: str, fps: float, *, use_videos: bo
     )
 
 
-def convert_episode(dataset: LeRobotDataset, episode_path: Path, raw_dir: Path) -> None:
-    prompt = load_prompt(raw_dir, episode_index(episode_path))
+def convert_episode(
+    dataset: LeRobotDataset,
+    episode_path: Path,
+    raw_dir: Path,
+    rng: np.random.Generator,
+    *,
+    prompt_source: Literal["seen", "unseen", "instructions", "auto"] = "seen",
+) -> None:
+    prompt = load_prompt(raw_dir, episode_index(episode_path), rng, prompt_source=prompt_source)
 
     with h5py.File(episode_path, "r") as episode:
         joint_positions = np.asarray(episode["joint_action/vector"][:], dtype=np.float32)
@@ -129,7 +159,9 @@ def main(
     output_dir: Path = DEFAULT_OUTPUT_DIR,
     *,
     repo_id: str | None = None,
-    fps: float = 16.67,
+    fps: float = 50.0,
+    prompt_source: Literal["seen", "unseen", "instructions", "auto"] = "seen",
+    prompt_seed: int | None = 0,
     use_videos: bool = False,
 ) -> None:
     repo_id = repo_id or output_dir.name
@@ -139,9 +171,10 @@ def main(
 
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     dataset = create_dataset(output_dir, repo_id, fps, use_videos=use_videos)
+    rng = np.random.default_rng(prompt_seed)
 
     for episode_path in tqdm(episode_paths, desc="Converting RoboTwin episodes"):
-        convert_episode(dataset, episode_path, raw_dir)
+        convert_episode(dataset, episode_path, raw_dir, rng, prompt_source=prompt_source)
 
     print(f"Saved {len(episode_paths)} episodes to {output_dir}")
 
