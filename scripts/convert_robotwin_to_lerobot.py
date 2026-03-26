@@ -33,7 +33,10 @@ def episode_index(path: Path) -> int:
 
 def decode_image(buffer: np.bytes_) -> np.ndarray:
     image = Image.open(io.BytesIO(bytes(buffer))).convert("RGB")
-    return np.asarray(image, dtype=np.uint8).transpose(2, 0, 1)
+    # RoboTwin camera buffers are tagged as RGB, but their red and blue channels
+    # are swapped in practice. Flip them here so the generated LeRobot dataset
+    # matches the scene metadata and rendered colors.
+    return np.asarray(image, dtype=np.uint8)[..., ::-1].transpose(2, 0, 1)
 
 
 def sample_prompt(candidates: list[str], rng: np.random.Generator) -> str:
@@ -79,7 +82,7 @@ def load_prompt(
     return raw_dir.name.replace("_", " ")
 
 
-def create_dataset(output_dir: Path, repo_id: str, fps: float, *, use_videos: bool) -> LeRobotDataset:
+def create_dataset(output_dir: Path, repo_id: str, fps: int, *, use_videos: bool) -> LeRobotDataset:
     if output_dir.exists():
         shutil.rmtree(output_dir)
 
@@ -159,7 +162,7 @@ def main(
     output_dir: Path = DEFAULT_OUTPUT_DIR,
     *,
     repo_id: str | None = None,
-    fps: float = 50.0,
+    fps: int = 50,
     prompt_source: Literal["seen", "unseen", "instructions", "auto"] = "seen",
     prompt_seed: int | None = 0,
     use_videos: bool = False,
