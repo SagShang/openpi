@@ -828,7 +828,7 @@ _CONFIGS = [
         batch_size=64,
     ),
     TrainConfig(
-        name="pi05_franka_lift_pot_lora",
+        name="pi05_franka_cube_stack_two_lora",
         model=pi0_config.Pi0Config(
             pi05=True,
             paligemma_variant="gemma_2b_lora",
@@ -836,10 +836,10 @@ _CONFIGS = [
         ),
         data=SimpleDataConfig(
             # This local dataset is expected at:
-            #   ${HF_LEROBOT_HOME}/lift_pot
+            #   ${HF_LEROBOT_HOME}/cube_stack_two
             # For the dataset in this repo, set:
             #   HF_LEROBOT_HOME=/home/wentao/openpi/data/datasets
-            repo_id="lift_pot",
+            repo_id="cube_stack_two",
             data_transforms=lambda model: _transforms.Group(
                 inputs=[
                     franka_policy.FrankaBimanualInputs(),
