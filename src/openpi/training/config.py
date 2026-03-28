@@ -19,10 +19,8 @@ import openpi.models.pi0_fast as pi0_fast
 import openpi.models.tokenizer as _tokenizer
 import openpi.policies.aloha_policy as aloha_policy
 import openpi.policies.droid_policy as droid_policy
-import openpi.policies.franka_policy as franka_policy
 import openpi.policies.libero_policy as libero_policy
 import openpi.shared.download as _download
-import openpi.shared.nnx_utils as nnx_utils
 import openpi.shared.normalize as _normalize
 import openpi.training.droid_rlds_dataset as droid_rlds_dataset
 import openpi.training.misc.polaris_config as polaris_config
@@ -232,6 +230,8 @@ class LeRobotAlohaDataConfig(DataConfigFactory):
     # If true, will convert joint dimensions to deltas with respect to the current state before passing to the model.
     # Gripper dimensions will remain in absolute values.
     use_delta_joint_actions: bool = True
+    # State/action dimensions expected in the dataset before model-side padding.
+    action_dim: int = 14
     # If provided, will be injected into the input data if the "prompt" key is not present.
     default_prompt: str | None = None
     # If true, this will convert the joint and gripper values from the standard Aloha space to
@@ -258,12 +258,15 @@ class LeRobotAlohaDataConfig(DataConfigFactory):
 
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        if self.adapt_to_pi and self.action_dim != 14:
+            raise ValueError("adapt_to_pi=True is only supported for 14D Aloha state/action spaces.")
         data_transforms = _transforms.Group(
-            inputs=[aloha_policy.AlohaInputs(adapt_to_pi=self.adapt_to_pi)],
-            outputs=[aloha_policy.AlohaOutputs(adapt_to_pi=self.adapt_to_pi)],
+            inputs=[aloha_policy.AlohaInputs(adapt_to_pi=self.adapt_to_pi, action_dim=self.action_dim)],
+            outputs=[aloha_policy.AlohaOutputs(adapt_to_pi=self.adapt_to_pi, action_dim=self.action_dim)],
         )
         if self.use_delta_joint_actions:
-            delta_action_mask = _transforms.make_bool_mask(6, -1, 6, -1)
+            joint_dim = self.action_dim // 2 - 1
+            delta_action_mask = _transforms.make_bool_mask(joint_dim, -1, joint_dim, -1)
             data_transforms = data_transforms.push(
                 inputs=[_transforms.DeltaActions(delta_action_mask)],
                 outputs=[_transforms.AbsoluteActions(delta_action_mask)],
@@ -827,61 +830,86 @@ _CONFIGS = [
         num_train_steps=20_000,
         batch_size=64,
     ),
+    # pi05_base by lora
     TrainConfig(
-        name="pi05_franka_cube_stack_two_lora",
+        name="pi05_base_aloha_lora",
         model=pi0_config.Pi0Config(
             pi05=True,
             paligemma_variant="gemma_2b_lora",
             action_expert_variant="gemma_300m_lora",
         ),
-        data=SimpleDataConfig(
-            # This local dataset is expected at:
-            #   ${HF_LEROBOT_HOME}/cube_stack_two
-            # For the dataset in this repo, set:
-            #   HF_LEROBOT_HOME=/home/wentao/openpi/data/datasets
-            repo_id="cube_stack_two",
-            data_transforms=lambda model: _transforms.Group(
+        data=LeRobotAlohaDataConfig(
+            repo_id="your_repo_id",  # your datasets repo_id
+            adapt_to_pi=False,
+            repack_transforms=_transforms.Group(
                 inputs=[
-                    franka_policy.FrankaBimanualInputs(),
-                    _transforms.DeltaActions(_transforms.make_bool_mask(7, -1, 7, -1)),
-                ],
-                outputs=[
-                    _transforms.AbsoluteActions(_transforms.make_bool_mask(7, -1, 7, -1)),
-                    franka_policy.FrankaBimanualOutputs(),
-                ],
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "observation.images.cam_high",
+                                "cam_left_wrist": "observation.images.cam_left_wrist",
+                                "cam_right_wrist": "observation.images.cam_right_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                            "prompt": "prompt",
+                        }
+                    )
+                ]
             ),
             base_config=DataConfig(
-                prompt_from_task=True,
-                action_sequence_keys=("action",),
-                repack_transforms=_transforms.Group(
-                    inputs=[
-                        _transforms.RepackTransform(
-                            {
-                                "images": {
-                                    "cam_high": "observation.images.cam_high",
-                                    "cam_left_wrist": "observation.images.cam_left_wrist",
-                                    "cam_right_wrist": "observation.images.cam_right_wrist",
-                                },
-                                "state": "observation.state",
-                                "actions": "action",
-                                "prompt": "prompt",
-                            }
-                        )
-                    ]
-                ),
+                prompt_from_task=True,  # Set to True for prompt by task_name
             ),
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("./data/pretrained/pi05_base/params"),
-        freeze_filter=nnx.Any(
-            pi0_config.Pi0Config(
-                pi05=True,
-                paligemma_variant="gemma_2b_lora",
-                action_expert_variant="gemma_300m_lora",
-            ).get_freeze_filter(),
-            nnx_utils.PathRegex("PaliGemma/img/.*"),
+        freeze_filter=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        batch_size=32,  # the total batch_size not pre_gpu batch_size
+        weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=30000,
+        fsdp_devices=1,
+    ),
+    # pi05_base franka by lora
+    TrainConfig(
+        name="pi05_base_franka_lora",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
         ),
-        num_train_steps=30_000,
-        batch_size=32,
+        data=LeRobotAlohaDataConfig(
+            repo_id="your_repo_id",  # your datasets repo_id
+            action_dim=16,
+            adapt_to_pi=False,
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "observation.images.cam_high",
+                                "cam_left_wrist": "observation.images.cam_left_wrist",
+                                "cam_right_wrist": "observation.images.cam_right_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                            "prompt": "prompt",
+                        }
+                    )
+                ]
+            ),
+            base_config=DataConfig(
+                prompt_from_task=True,  # Set to True for prompt by task_name
+            ),
+        ),
+        freeze_filter=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        batch_size=32,  # the total batch_size not pre_gpu batch_size
+        weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=30000,
+        fsdp_devices=1,
     ),
     #
     # Fine-tuning DROID configs.

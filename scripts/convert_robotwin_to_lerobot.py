@@ -82,7 +82,12 @@ def load_prompt(
     return raw_dir.name.replace("_", " ")
 
 
-def create_dataset(output_dir: Path, repo_id: str, fps: int, *, use_videos: bool) -> LeRobotDataset:
+def infer_action_dim(episode_path: Path) -> int:
+    with h5py.File(episode_path, "r") as episode:
+        return int(episode["joint_action/vector"].shape[-1])
+
+
+def create_dataset(output_dir: Path, repo_id: str, fps: int, *, action_dim: int, use_videos: bool) -> LeRobotDataset:
     if output_dir.exists():
         shutil.rmtree(output_dir)
 
@@ -112,12 +117,12 @@ def create_dataset(output_dir: Path, repo_id: str, fps: int, *, use_videos: bool
             },
             "observation.state": {
                 "dtype": "float32",
-                "shape": (16,),
+                "shape": (action_dim,),
                 "names": ["state"],
             },
             "action": {
                 "dtype": "float32",
-                "shape": (16,),
+                "shape": (action_dim,),
                 "names": ["action"],
             },
         },
@@ -172,8 +177,15 @@ def main(
     if not episode_paths:
         raise ValueError(f"No episodes found in {raw_dir / 'data'}")
 
+    action_dim = infer_action_dim(episode_paths[0])
+    for episode_path in episode_paths[1:]:
+        episode_action_dim = infer_action_dim(episode_path)
+        if episode_action_dim != action_dim:
+            raise ValueError(
+                f"Inconsistent action dims in {raw_dir}: expected {action_dim}, got {episode_action_dim} in {episode_path}"
+            )
     output_dir.parent.mkdir(parents=True, exist_ok=True)
-    dataset = create_dataset(output_dir, repo_id, fps, use_videos=use_videos)
+    dataset = create_dataset(output_dir, repo_id, fps, action_dim=action_dim, use_videos=use_videos)
     rng = np.random.default_rng(prompt_seed)
 
     for episode_path in tqdm(episode_paths, desc="Converting RoboTwin episodes"):

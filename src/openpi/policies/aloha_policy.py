@@ -23,17 +23,18 @@ def make_aloha_example() -> dict:
 
 @dataclasses.dataclass(frozen=True)
 class AlohaInputs(transforms.DataTransformFn):
-    """Inputs for the Aloha policy.
+    """Inputs for Aloha-style bimanual datasets.
 
     Expected inputs:
-    - images: dict[name, img] where img is [channel, height, width]. name must be in EXPECTED_CAMERAS.
-    - state: [14]
-    - actions: [action_horizon, 14]
+    - images: dict[name, img] where img is [channel, height, width]. names must be a subset of EXPECTED_CAMERAS.
+    - state: [action_dim]
+    - actions: [action_horizon, action_dim]
     """
 
     # If true, this will convert the joint and gripper values from the standard Aloha space to
     # the space used by the pi internal runtime which was used to train the base model.
     adapt_to_pi: bool = True
+    action_dim: int = 14
 
     # The expected cameras names. All input cameras must be in this set. Missing cameras will be
     # replaced with black images and the corresponding `image_mask` will be set to False.
@@ -41,6 +42,10 @@ class AlohaInputs(transforms.DataTransformFn):
 
     def __call__(self, data: dict) -> dict:
         data = _decode_aloha(data, adapt_to_pi=self.adapt_to_pi)
+
+        state = np.asarray(data["state"])
+        if state.shape[-1] != self.action_dim:
+            raise ValueError(f"Expected {self.action_dim}D state, got shape {state.shape}")
 
         in_images = data["images"]
         if set(in_images) - set(self.EXPECTED_CAMERAS):
@@ -72,12 +77,14 @@ class AlohaInputs(transforms.DataTransformFn):
         inputs = {
             "image": images,
             "image_mask": image_masks,
-            "state": data["state"],
+            "state": state,
         }
 
         # Actions are only available during training.
         if "actions" in data:
             actions = np.asarray(data["actions"])
+            if actions.shape[-1] != self.action_dim:
+                raise ValueError(f"Expected {self.action_dim}D actions, got shape {actions.shape}")
             actions = _encode_actions_inv(actions, adapt_to_pi=self.adapt_to_pi)
             inputs["actions"] = actions
 
@@ -94,10 +101,11 @@ class AlohaOutputs(transforms.DataTransformFn):
     # If true, this will convert the joint and gripper values from the standard Aloha space to
     # the space used by the pi internal runtime which was used to train the base model.
     adapt_to_pi: bool = True
+    action_dim: int = 14
 
     def __call__(self, data: dict) -> dict:
-        # Only return the first 14 dims.
-        actions = np.asarray(data["actions"][:, :14])
+        # Only return the dataset action dimensions; model transforms may pad beyond that.
+        actions = np.asarray(data["actions"][:, : self.action_dim])
         return {"actions": _encode_actions(actions, adapt_to_pi=self.adapt_to_pi)}
 
 
