@@ -14,9 +14,6 @@ from PIL import Image
 from tqdm import tqdm
 import tyro
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_RAW_DIR = Path("/home/wentao/RoboTwin/data/lift_pot")
-DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "data/datasets/lift_pot"
 CAMERA_KEYS = {
     "cam_high": "observation/head_camera/rgb",
     "cam_left_wrist": "observation/left_camera/rgb",
@@ -33,16 +30,19 @@ def episode_index(path: Path) -> int:
 
 def decode_image(buffer: np.bytes_) -> np.ndarray:
     image = Image.open(io.BytesIO(bytes(buffer))).convert("RGB")
-    # RoboTwin camera buffers are tagged as RGB, but their red and blue channels
-    # are swapped in practice. Flip them here so the generated LeRobot dataset
-    # matches the scene metadata and rendered colors.
-    return np.asarray(image, dtype=np.uint8)[..., ::-1].transpose(2, 0, 1)
+    return np.asarray(image, dtype=np.uint8).transpose(2, 0, 1)
 
 
-def sample_prompt(candidates: list[str], rng: np.random.Generator) -> str:
-    if not candidates:
-        raise ValueError("Prompt candidate list is empty")
-    return str(rng.choice(candidates))
+def infer_shapes(episode_path: Path) -> tuple[tuple[int, ...], dict[str, tuple[int, int, int]]]:
+    with h5py.File(episode_path, "r") as episode:
+        assert episode["joint_action/vector"].shape[0] > 0, f"{episode_path}: no frames"
+        vector_shape = tuple(np.asarray(episode["joint_action/vector"][0], dtype=np.float32).shape)
+        image_shapes = {}
+        for camera_name, camera_key in CAMERA_KEYS.items():
+            camera_frames = episode[camera_key]
+            assert camera_frames.shape[0] > 0, f"{episode_path}: {camera_name} has no frames"
+            image_shapes[camera_name] = decode_image(camera_frames[0]).shape
+        return vector_shape, image_shapes
 
 
 def load_prompt(
@@ -50,79 +50,54 @@ def load_prompt(
     episode_id: int,
     rng: np.random.Generator,
     *,
-    prompt_source: Literal["seen", "unseen", "instructions", "auto"] = "seen",
+    prompt_source: Literal["seen", "unseen"] = "seen",
 ) -> str:
     instruction_path = raw_dir / "instructions" / f"episode{episode_id}.json"
-    if not instruction_path.exists():
-        return raw_dir.name.replace("_", " ")
+    assert instruction_path.exists(), f"Missing instruction file: {instruction_path}"
 
     with instruction_path.open() as f:
         instruction = json.load(f)
 
-    if isinstance(instruction, str):
-        return instruction
-    if isinstance(instruction, list) and instruction:
-        return sample_prompt(instruction, rng)
-    if isinstance(instruction, dict):
-        if prompt_source == "auto":
-            candidate_keys = ("instructions", "seen", "unseen")
-        elif prompt_source == "seen":
-            # RoboTwin official training keeps only seen instructions, then samples one per episode.
-            candidate_keys = ("seen", "instructions")
-        else:
-            candidate_keys = (prompt_source,)
-
-        for key in candidate_keys:
-            values = instruction.get(key)
-            if isinstance(values, list) and values:
-                return sample_prompt(values, rng)
-            if isinstance(values, str):
-                return values
-
-    return raw_dir.name.replace("_", " ")
+    return str(rng.choice(instruction[prompt_source]))
 
 
-def infer_action_dim(episode_path: Path) -> int:
-    with h5py.File(episode_path, "r") as episode:
-        return int(episode["joint_action/vector"].shape[-1])
-
-
-def create_dataset(output_dir: Path, repo_id: str, fps: int, *, action_dim: int, use_videos: bool) -> LeRobotDataset:
+def create_dataset(
+    output_dir: Path,
+    repo: str,
+    fps: int,
+    *,
+    vector_shape: tuple[int, ...],
+    image_shapes: dict[str, tuple[int, int, int]],
+    use_videos: bool,
+) -> LeRobotDataset:
     if output_dir.exists():
         shutil.rmtree(output_dir)
 
     media_dtype = "video" if use_videos else "image"
 
     return LeRobotDataset.create(
-        repo_id=repo_id,
+        repo_id=repo,
         root=output_dir,
         robot_type="robotwin",
         fps=fps,
         use_videos=use_videos,
         features={
-            "observation.images.cam_high": {
-                "dtype": media_dtype,
-                "shape": (3, 240, 320),
-                "names": ["channels", "height", "width"],
-            },
-            "observation.images.cam_left_wrist": {
-                "dtype": media_dtype,
-                "shape": (3, 240, 320),
-                "names": ["channels", "height", "width"],
-            },
-            "observation.images.cam_right_wrist": {
-                "dtype": media_dtype,
-                "shape": (3, 240, 320),
-                "names": ["channels", "height", "width"],
+            **{
+                f"observation.images.{camera_name}": {
+                    "dtype": media_dtype,
+                    "shape": image_shapes[camera_name],
+                    "names": ["channels", "height", "width"],
+                }
+                for camera_name in CAMERA_KEYS
             },
             "observation.state": {
                 "dtype": "float32",
-                "shape": (action_dim,),
+                "shape": vector_shape,
                 "names": ["state"],
             },
             "action": {
                 "dtype": "float32",
-                "shape": (action_dim,),
+                "shape": vector_shape,
                 "names": ["action"],
             },
         },
@@ -135,26 +110,40 @@ def convert_episode(
     raw_dir: Path,
     rng: np.random.Generator,
     *,
-    prompt_source: Literal["seen", "unseen", "instructions", "auto"] = "seen",
+    vector_shape: tuple[int, ...],
+    image_shapes: dict[str, tuple[int, int, int]],
+    prompt_source: Literal["seen", "unseen"] = "seen",
 ) -> None:
     prompt = load_prompt(raw_dir, episode_index(episode_path), rng, prompt_source=prompt_source)
 
     with h5py.File(episode_path, "r") as episode:
-        joint_positions = np.asarray(episode["joint_action/vector"][:], dtype=np.float32)
-        next_joint_positions = np.concatenate([joint_positions[1:], joint_positions[-1:]], axis=0)
+        states = np.asarray(episode["joint_action/vector"][:], dtype=np.float32)
+        assert len(states) > 0, f"{episode_path}: no frames"
+        actions = np.concatenate([states[1:], states[-1:]], axis=0)
 
-        for frame_idx in range(len(joint_positions)):
+        for frame_idx in range(len(states)):
+            frame = {}
+            for camera_name, camera_key in CAMERA_KEYS.items():
+                image = decode_image(episode[camera_key][frame_idx])
+                assert image.shape == image_shapes[camera_name], (
+                    f"{episode_path}: {camera_name} frame {frame_idx} expected shape "
+                    f"{image_shapes[camera_name]}, got {image.shape}"
+                )
+                frame[f"observation.images.{camera_name}"] = image
+
+            state = states[frame_idx]
+            action = actions[frame_idx]
+            assert state.shape == vector_shape, (
+                f"{episode_path}: state frame {frame_idx} expected shape {vector_shape}, got {state.shape}"
+            )
+            assert action.shape == vector_shape, (
+                f"{episode_path}: action frame {frame_idx} expected shape {vector_shape}, got {action.shape}"
+            )
             dataset.add_frame(
                 {
-                    "observation.images.cam_high": decode_image(episode[CAMERA_KEYS["cam_high"]][frame_idx]),
-                    "observation.images.cam_left_wrist": decode_image(
-                        episode[CAMERA_KEYS["cam_left_wrist"]][frame_idx]
-                    ),
-                    "observation.images.cam_right_wrist": decode_image(
-                        episode[CAMERA_KEYS["cam_right_wrist"]][frame_idx]
-                    ),
-                    "observation.state": joint_positions[frame_idx],
-                    "action": next_joint_positions[frame_idx],
+                    **frame,
+                    "observation.state": state,
+                    "action": action,
                     "task": prompt,
                 }
             )
@@ -163,35 +152,43 @@ def convert_episode(
 
 
 def main(
-    raw_dir: Path = DEFAULT_RAW_DIR,
-    output_dir: Path = DEFAULT_OUTPUT_DIR,
+    input: Path,
+    output: Path,
     *,
-    repo_id: str | None = None,
+    repo: str | None = None,
     fps: int = 50,
-    prompt_source: Literal["seen", "unseen", "instructions", "auto"] = "seen",
+    prompt_source: Literal["seen", "unseen"] = "seen",
     prompt_seed: int | None = 0,
     use_videos: bool = False,
 ) -> None:
-    repo_id = repo_id or output_dir.name
-    episode_paths = sorted((raw_dir / "data").glob("episode*.hdf5"), key=episode_index)
-    if not episode_paths:
-        raise ValueError(f"No episodes found in {raw_dir / 'data'}")
+    repo = repo or output.name
+    episode_paths = sorted((input / "data").glob("episode*.hdf5"), key=episode_index)
+    assert episode_paths, f"No episodes found in {input / 'data'}"
 
-    action_dim = infer_action_dim(episode_paths[0])
-    for episode_path in episode_paths[1:]:
-        episode_action_dim = infer_action_dim(episode_path)
-        if episode_action_dim != action_dim:
-            raise ValueError(
-                f"Inconsistent action dims in {raw_dir}: expected {action_dim}, got {episode_action_dim} in {episode_path}"
-            )
-    output_dir.parent.mkdir(parents=True, exist_ok=True)
-    dataset = create_dataset(output_dir, repo_id, fps, action_dim=action_dim, use_videos=use_videos)
+    vector_shape, image_shapes = infer_shapes(episode_paths[0])
+    output.parent.mkdir(parents=True, exist_ok=True)
+    dataset = create_dataset(
+        output,
+        repo,
+        fps,
+        vector_shape=vector_shape,
+        image_shapes=image_shapes,
+        use_videos=use_videos,
+    )
     rng = np.random.default_rng(prompt_seed)
 
     for episode_path in tqdm(episode_paths, desc="Converting RoboTwin episodes"):
-        convert_episode(dataset, episode_path, raw_dir, rng, prompt_source=prompt_source)
+        convert_episode(
+            dataset,
+            episode_path,
+            input,
+            rng,
+            vector_shape=vector_shape,
+            image_shapes=image_shapes,
+            prompt_source=prompt_source,
+        )
 
-    print(f"Saved {len(episode_paths)} episodes to {output_dir}")
+    print(f"Saved {len(episode_paths)} episodes to {output}")
 
 
 if __name__ == "__main__":
