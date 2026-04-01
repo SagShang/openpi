@@ -839,7 +839,7 @@ _CONFIGS = [
             action_expert_variant="gemma_300m_lora",
         ),
         data=LeRobotAlohaDataConfig(
-            repo_id="your_repo_id",  # your datasets repo_id
+            repo_id="stack_blocks_two_aloha_clean_50",  # your datasets repo_id
             adapt_to_pi=False,
             repack_transforms=_transforms.Group(
                 inputs=[
@@ -880,7 +880,7 @@ _CONFIGS = [
             action_expert_variant="gemma_300m_lora",
         ),
         data=LeRobotAlohaDataConfig(
-            repo_id="your_repo_id",  # your datasets repo_id
+            repo_id="stack_blocks_two_franka_clean_100",  # your datasets repo_id
             action_dim=16,
             adapt_to_pi=False,
             repack_transforms=_transforms.Group(
