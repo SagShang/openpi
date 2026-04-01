@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import base64
 import json
 import socket
@@ -62,34 +61,13 @@ class RoboTwinPolicyModel:
         *,
         train_config_name: str,
         checkpoint_dir: str,
-        data_repo_id: str | None = None,
-        asset_id: str | None = None,
         default_prompt: str | None = None,
         pytorch_device: str | None = None,
     ):
-        checkpoint_path = _resolve_checkpoint_dir(Path(checkpoint_dir))
         train_config = _config.get_config(train_config_name)
-        inferred_asset_id = _infer_asset_id_from_checkpoint(checkpoint_path)
-        resolved_repo_id = data_repo_id or inferred_asset_id
-        resolved_asset_id = asset_id or inferred_asset_id
-
-        if resolved_repo_id is not None or resolved_asset_id is not None:
-            assets = dataclasses.replace(
-                train_config.data.assets,
-                asset_id=resolved_asset_id or train_config.data.assets.asset_id,
-            )
-            train_config = dataclasses.replace(
-                train_config,
-                data=dataclasses.replace(
-                    train_config.data,
-                    repo_id=resolved_repo_id or train_config.data.repo_id,
-                    assets=assets,
-                ),
-            )
-
         self.policy = _policy_config.create_trained_policy(
             train_config,
-            checkpoint_path,
+            checkpoint_dir,
             default_prompt=default_prompt,
             pytorch_device=pytorch_device,
         )
@@ -184,8 +162,6 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True, help="OpenPI train config name")
     parser.add_argument("--checkpoint-dir", required=True, help="Path to checkpoint directory")
-    parser.add_argument("--data-repo-id", default=None, help="Dataset repo_id used during training")
-    parser.add_argument("--asset-id", default=None, help="Asset id used for checkpoint norm stats")
     parser.add_argument("--default-prompt", default=None)
     parser.add_argument("--pytorch-device", default=None)
     parser.add_argument("--host", default="0.0.0.0")
@@ -198,39 +174,11 @@ def main():
     model = RoboTwinPolicyModel(
         train_config_name=args.config,
         checkpoint_dir=args.checkpoint_dir,
-        data_repo_id=args.data_repo_id,
-        asset_id=args.asset_id,
         default_prompt=args.default_prompt,
         pytorch_device=args.pytorch_device,
     )
     server = PolicyServer(model=model, host=args.host, port=args.port)
     server.serve_forever()
-
-
-def _resolve_checkpoint_dir(checkpoint_dir: Path) -> Path:
-    if (checkpoint_dir / "params" / "_METADATA").exists() or (checkpoint_dir / "model.safetensors").exists():
-        return checkpoint_dir
-
-    if checkpoint_dir.is_dir():
-        step_dirs = sorted(
-            [path for path in checkpoint_dir.iterdir() if path.is_dir() and path.name.isdigit()],
-            key=lambda path: int(path.name),
-        )
-        if step_dirs:
-            return step_dirs[-1]
-
-    return checkpoint_dir
-
-
-def _infer_asset_id_from_checkpoint(checkpoint_dir: Path) -> str | None:
-    assets_dir = checkpoint_dir / "assets"
-    if not assets_dir.is_dir():
-        return None
-
-    asset_dirs = sorted(path.name for path in assets_dir.iterdir() if path.is_dir())
-    if len(asset_dirs) == 1:
-        return asset_dirs[0]
-    return None
 
 
 if __name__ == "__main__":
