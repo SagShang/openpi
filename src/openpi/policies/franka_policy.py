@@ -7,11 +7,12 @@ import numpy as np
 from openpi import transforms
 
 ArmCount = Literal[1, 2]
+ControlMode = Literal["joint", "eef"]
 
 
-def make_franka_example(*, num_arms: ArmCount = 1) -> dict:
+def make_franka_example(*, num_arms: ArmCount = 1, control_mode: ControlMode = "joint") -> dict:
     """Creates a random input example for the Franka policy."""
-    action_dim = _action_dim(num_arms)
+    action_dim = _action_dim(num_arms, control_mode)
     images = {
         "cam_high": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
     }
@@ -28,8 +29,9 @@ def make_franka_example(*, num_arms: ArmCount = 1) -> dict:
     }
 
 
-def _action_dim(num_arms: ArmCount) -> int:
-    return 8 * num_arms
+def _action_dim(num_arms: ArmCount, control_mode: ControlMode) -> int:
+    per_arm_dim = 8 if control_mode == "joint" else 7
+    return per_arm_dim * num_arms
 
 
 def _parse_image(image) -> np.ndarray:
@@ -69,17 +71,21 @@ class FrankaInputs(transforms.DataTransformFn):
     - images: dict[name, img] where img is [channel, height, width] or [height, width, channel].
       - Single arm: requires `cam_high`; optionally accepts `cam_wrist`.
       - Dual arm: requires `cam_high`; optionally accepts `cam_left_wrist` and `cam_right_wrist`.
-    - state: [8] for single arm, [16] for dual arm.
+    - state:
+      - joint mode: [8] for single arm, [16] for dual arm.
+      - eef mode: [7] for single arm, [14] for dual arm.
     - actions: [action_horizon, state_dim] (training only).
 
     Notes:
-    - Each arm uses `[joint_0..joint_6, gripper]`.
+    - `joint` mode assumes `[joint_0..joint_6, gripper]` for each arm.
+    - `eef` mode assumes a 6-DoF end-effector command plus gripper for each arm.
     """
 
     num_arms: ArmCount = 1
+    control_mode: ControlMode = "joint"
 
     def __call__(self, data: dict) -> dict:
-        action_dim = _action_dim(self.num_arms)
+        action_dim = _action_dim(self.num_arms, self.control_mode)
 
         state = _validate_vector("state", np.asarray(data["state"], dtype=np.float32), action_dim)
         in_images = {name: _parse_image(img) for name, img in data["images"].items()}
@@ -139,8 +145,9 @@ class FrankaOutputs(transforms.DataTransformFn):
     """Outputs for the Franka policy."""
 
     num_arms: ArmCount = 1
+    control_mode: ControlMode = "joint"
 
     def __call__(self, data: dict) -> dict:
-        action_dim = _action_dim(self.num_arms)
+        action_dim = _action_dim(self.num_arms, self.control_mode)
         actions = _validate_vector("actions", np.asarray(data["actions"], dtype=np.float32), action_dim, exact=False)
         return {"actions": actions[:, :action_dim]}

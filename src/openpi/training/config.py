@@ -306,6 +306,7 @@ class LeRobotFrankaDataConfig(DataConfigFactory):
     """Config for custom Franka datasets in LeRobot format."""
 
     num_arms: franka_policy.ArmCount = 1
+    control_mode: franka_policy.ControlMode = "joint"
     # If true, convert arm motion dimensions to deltas with respect to the current state.
     # Gripper dimensions remain absolute.
     use_delta_actions: bool = True
@@ -325,17 +326,20 @@ class LeRobotFrankaDataConfig(DataConfigFactory):
             inputs=[
                 franka_policy.FrankaInputs(
                     num_arms=self.num_arms,
+                    control_mode=self.control_mode,
                 )
             ],
             outputs=[
                 franka_policy.FrankaOutputs(
                     num_arms=self.num_arms,
+                    control_mode=self.control_mode,
                 )
             ],
         )
 
         if self.use_delta_actions:
-            delta_action_mask = _transforms.make_bool_mask(*([7, -1] * self.num_arms))
+            per_arm_delta_dim = 7 if self.control_mode == "joint" else 6
+            delta_action_mask = _transforms.make_bool_mask(*([per_arm_delta_dim, -1] * self.num_arms))
             data_transforms = data_transforms.push(
                 inputs=[_transforms.DeltaActions(delta_action_mask)],
                 outputs=[_transforms.AbsoluteActions(delta_action_mask)],
@@ -905,6 +909,7 @@ _CONFIGS = [
     TrainConfig(
         # This config is for fine-tuning pi0-base on a custom Franka LeRobot dataset.
         # For dual-arm datasets, set `num_arms=2` and update the model action_dim accordingly.
+        # For end-effector control, set `control_mode="eef"` and choose the matching model action_dim.
         name="pi0_franka_finetune",
         model=pi0_config.Pi0Config(action_dim=8),
         data=LeRobotFrankaDataConfig(
@@ -916,6 +921,7 @@ _CONFIGS = [
                 asset_id="franka",
             ),
             num_arms=1,
+            control_mode="joint",
             use_delta_actions=True,
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
