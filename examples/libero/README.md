@@ -12,9 +12,18 @@ git submodule update --init --recursive
 
 ## With Docker (recommended)
 
+Before running the commands below, install Docker and the NVIDIA container
+toolkit as described in `docs/docker.md`. On Ubuntu 22.04, you can use
+`scripts/docker/install_docker_ubuntu22.sh` and
+`scripts/docker/install_nvidia_container_toolkit.sh`.
+
 ```bash
-# Grant access to the X11 server:
-sudo xhost +local:docker
+# If you are behind an HTTP proxy, export it first. For example:
+# proxy 7890
+#
+# Point Docker at the current X11 auth cookie. This works for both local
+# desktop sessions and SSH X11 forwarding.
+export XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"
 
 # To run with the default checkpoint and task suite:
 SERVER_ARGS="--env LIBERO" docker compose -f examples/libero/compose.yml up --build
@@ -22,6 +31,11 @@ SERVER_ARGS="--env LIBERO" docker compose -f examples/libero/compose.yml up --bu
 # To run with glx for Mujoco instead (use this if you have egl errors):
 MUJOCO_GL=glx SERVER_ARGS="--env LIBERO" docker compose -f examples/libero/compose.yml up --build
 ```
+
+If you are on a local desktop X11 session and prefer using `xhost`, install it on
+Ubuntu with `sudo apt install x11-xserver-utils` and run `xhost +local:docker`
+without `sudo`. For SSH-forwarded X11 sessions such as `DISPLAY=localhost:10.0`,
+`xhost +local:docker` is not the right mechanism; use the `XAUTHORITY` setup above.
 
 You can customize the loaded checkpoint by providing additional `SERVER_ARGS` (see `scripts/serve_policy.py`), and the LIBERO task suite by providing additional `CLIENT_ARGS` (see `examples/libero/main.py`).
 For example:

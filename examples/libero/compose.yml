@@ -8,6 +8,16 @@ services:
     build:
       context: ../..
       dockerfile: examples/libero/Dockerfile
+      network: host
+      args:
+        HTTP_PROXY: ${http_proxy:-}
+        HTTPS_PROXY: ${https_proxy:-}
+        ALL_PROXY: ${all_proxy:-}
+        NO_PROXY: ${no_proxy:-localhost,127.0.0.1}
+        http_proxy: ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        all_proxy: ${all_proxy:-}
+        no_proxy: ${no_proxy:-localhost,127.0.0.1}
     init: true
     tty: true
     network_mode: host
@@ -16,9 +26,19 @@ services:
       - $PWD:/app
       - ../../data:/data
       - /tmp/.X11-unix:/tmp/.X11-unix:ro
+      - ${XAUTHORITY:-/dev/null}:/tmp/.Xauthority:ro
     environment:
       - CLIENT_ARGS
       - DISPLAY=$DISPLAY
+      - XAUTHORITY=/tmp/.Xauthority
+      - HTTP_PROXY=${http_proxy:-}
+      - HTTPS_PROXY=${https_proxy:-}
+      - ALL_PROXY=${all_proxy:-}
+      - NO_PROXY=${no_proxy:-localhost,127.0.0.1}
+      - http_proxy
+      - https_proxy
+      - all_proxy
+      - no_proxy=${no_proxy:-localhost,127.0.0.1}
       - MUJOCO_GL=${MUJOCO_GL:-egl}
       - MUJOCO_EGL_DEVICE_ID=0
       - NVIDIA_DRIVER_CAPABILITIES=all
@@ -36,6 +56,16 @@ services:
     build:
       context: ../..
       dockerfile: scripts/docker/serve_policy.Dockerfile
+      network: host
+      args:
+        HTTP_PROXY: ${http_proxy:-}
+        HTTPS_PROXY: ${https_proxy:-}
+        ALL_PROXY: ${all_proxy:-}
+        NO_PROXY: ${no_proxy:-localhost,127.0.0.1}
+        http_proxy: ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        all_proxy: ${all_proxy:-}
+        no_proxy: ${no_proxy:-localhost,127.0.0.1}
     init: true
     tty: true
     network_mode: host
@@ -46,6 +76,14 @@ services:
       - SERVER_ARGS
       - OPENPI_DATA_HOME=/openpi_assets
       - IS_DOCKER=true
+      - HTTP_PROXY=${http_proxy:-}
+      - HTTPS_PROXY=${https_proxy:-}
+      - ALL_PROXY=${all_proxy:-}
+      - NO_PROXY=${no_proxy:-localhost,127.0.0.1}
+      - http_proxy
+      - https_proxy
+      - all_proxy
+      - no_proxy=${no_proxy:-localhost,127.0.0.1}
 
     # Comment out this block if not running on a machine with GPUs.
     deploy:
