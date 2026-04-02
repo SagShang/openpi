@@ -22,8 +22,10 @@ def test_train(tmp_path: pathlib.Path, config_name: str):
         resume=False,
         num_train_steps=2,
         log_interval=1,
+        tensorboard_enabled=True,
     )
     train.main(config)
+    assert list(config.tensorboard_dir.glob("events.out.tfevents.*"))
 
     # test resuming
     config = dataclasses.replace(config, resume=True, num_train_steps=4)

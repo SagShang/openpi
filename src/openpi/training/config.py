@@ -600,8 +600,8 @@ class TrainConfig:
     # If true, will resume training from the last checkpoint.
     resume: bool = False
 
-    # If true, will enable wandb logging.
-    wandb_enabled: bool = True
+    # If true, will enable TensorBoard logging.
+    tensorboard_enabled: bool = True
 
     # Used to pass metadata to the policy server.
     policy_metadata: dict[str, Any] | None = None
@@ -623,6 +623,11 @@ class TrainConfig:
         if not self.exp_name:
             raise ValueError("--exp_name must be set")
         return (pathlib.Path(self.checkpoint_base_dir) / self.name / self.exp_name).resolve()
+
+    @property
+    def tensorboard_dir(self) -> pathlib.Path:
+        """Get the TensorBoard log directory for this config."""
+        return self.checkpoint_dir / "tensorboard"
 
     @property
     def trainable_filter(self) -> nnx.filterlib.Filter:
@@ -1079,7 +1084,7 @@ _CONFIGS = [
         overwrite=True,
         exp_name="debug",
         num_train_steps=10,
-        wandb_enabled=False,
+        tensorboard_enabled=False,
     ),
     TrainConfig(
         name="debug_restore",
@@ -1090,7 +1095,7 @@ _CONFIGS = [
         overwrite=True,
         exp_name="debug",
         num_train_steps=10,
-        wandb_enabled=False,
+        tensorboard_enabled=False,
     ),
     TrainConfig(
         name="debug_pi05",
@@ -1100,7 +1105,7 @@ _CONFIGS = [
         num_train_steps=10,
         overwrite=True,
         exp_name="debug_pi05",
-        wandb_enabled=False,
+        tensorboard_enabled=False,
     ),
     # RoboArena & PolaRiS configs.
     *roboarena_config.get_roboarena_configs(),
