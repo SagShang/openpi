@@ -215,7 +215,7 @@ def get_robotwin_configs():
         # pi05_franka by full
         TrainConfig(
             name="pi05_franka_full_base",
-            model=pi0_config.Pi0Config(pi05=True),
+            model=pi0_config.Pi0Config(pi05=True, action_horizon=20),
             data=make_robotwin_franka_data_config("your_repo_id"),
             weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
             num_train_steps=20_000,
@@ -229,6 +229,7 @@ def get_robotwin_configs():
                 pi05=True,
                 paligemma_variant="gemma_2b_lora",
                 action_expert_variant="gemma_300m_lora",
+                action_horizon=20,
             ),
             data=make_robotwin_franka_data_config("your_repo_id"),
             freeze_filter=pi0_config.Pi0Config(
@@ -246,6 +247,7 @@ def get_robotwin_configs():
             model=pi0_config.Pi0Config(
                 paligemma_variant="gemma_2b_lora",
                 action_expert_variant="gemma_300m_lora",
+                action_horizon=20,
             ),
             data=make_robotwin_franka_data_config("your_repo_id"),
             freeze_filter=pi0_config.Pi0Config(
@@ -260,7 +262,7 @@ def get_robotwin_configs():
         # pi0_fast_franka by lora
         TrainConfig(
             name="pi0_fast_franka_robotwin_lora",
-            model=pi0_fast.Pi0FASTConfig(paligemma_variant="gemma_2b_lora"),
+            model=pi0_fast.Pi0FASTConfig(paligemma_variant="gemma_2b_lora", action_horizon=20),
             data=make_robotwin_franka_data_config("your_repo_id"),
             freeze_filter=pi0_fast.Pi0FASTConfig(
                 paligemma_variant="gemma_2b_lora",
@@ -273,7 +275,7 @@ def get_robotwin_configs():
         # pi0_franka by full
         TrainConfig(
             name="pi0_base_franka_robotwin_full",
-            model=pi0_config.Pi0Config(),
+            model=pi0_config.Pi0Config(action_horizon=20),
             data=make_robotwin_franka_data_config("your_repo_id"),
             freeze_filter=pi0_config.Pi0Config().get_freeze_filter(),
             batch_size=32,  # the total batch_size not pre_gpu batch_size
@@ -284,7 +286,7 @@ def get_robotwin_configs():
         # pi0_fast_franka by full
         TrainConfig(
             name="pi0_fast_franka_robotwin_full",
-            model=pi0_fast.Pi0FASTConfig(),
+            model=pi0_fast.Pi0FASTConfig(action_horizon=20),
             data=make_robotwin_franka_data_config("your_repo_id"),
             freeze_filter=pi0_fast.Pi0FASTConfig().get_freeze_filter(),
             batch_size=32,
