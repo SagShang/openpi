@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
+ROOT_DIR = Path(__file__).resolve().parents[2]
 SRC_DIR = ROOT_DIR / "src"
 CLIENT_SRC_DIR = ROOT_DIR / "packages" / "openpi-client" / "src"
 for path in (SRC_DIR, CLIENT_SRC_DIR):
