@@ -11,6 +11,7 @@ import h5py
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 import numpy as np
 from PIL import Image
+import pyarrow.parquet as pq
 from tqdm import tqdm
 import tyro
 
@@ -19,6 +20,40 @@ CAMERA_KEYS = {
     "cam_left_wrist": "observation/left_camera/rgb",
     "cam_right_wrist": "observation/right_camera/rgb",
 }
+
+
+def _replace_list_with_sequence(node):
+    if isinstance(node, dict):
+        if node.get("_type") == "List":
+            node["_type"] = "Sequence"
+        for value in node.values():
+            _replace_list_with_sequence(value)
+    elif isinstance(node, list):
+        for value in node:
+            _replace_list_with_sequence(value)
+
+
+def normalize_parquet_metadata(dataset_root: Path) -> int:
+    patched_files = 0
+    for parquet_path in sorted((dataset_root / "data").rglob("*.parquet")):
+        table = pq.read_table(parquet_path)
+        metadata = dict(table.schema.metadata or {})
+        huggingface_meta = metadata.get(b"huggingface")
+        if huggingface_meta is None:
+            continue
+
+        info = json.loads(huggingface_meta.decode("utf-8"))
+        before = json.dumps(info, sort_keys=True)
+        _replace_list_with_sequence(info)
+        after = json.dumps(info, sort_keys=True)
+        if before == after:
+            continue
+
+        metadata[b"huggingface"] = after.encode("utf-8")
+        pq.write_table(table.replace_schema_metadata(metadata), parquet_path)
+        patched_files += 1
+
+    return patched_files
 
 
 def episode_index(path: Path) -> int:
@@ -188,6 +223,9 @@ def main(
             prompt_source=prompt_source,
         )
 
+    patched_files = normalize_parquet_metadata(output)
+    if patched_files:
+        print(f"Normalized Hugging Face parquet metadata in {patched_files} files")
     print(f"Saved {len(episode_paths)} episodes to {output}")
 
 
