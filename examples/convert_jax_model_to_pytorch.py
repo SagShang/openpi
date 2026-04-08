@@ -8,22 +8,20 @@ This script loads a JAX model checkpoint using orbax and can either:
 
 Usage:
     # Just inspect keys:
-    python examples/convert_jax_model_to_pytorch.py --checkpoint_dir /path/to/checkpoint --inspect_only
-    python examples/convert_jax_model_to_pytorch.py --checkpoint_dir /path/to/checkpoint --inspect_only
+    python examples/convert_jax_model_to_pytorch.py --checkpoint-dir /path/to/checkpoint --config-name pi05_droid --inspect-only
 
     # Convert to PyTorch:
-    python examples/convert_jax_model_to_pytorch.py --checkpoint_dir /path/to/checkpoint --output_path /path/to/output
-    python examples/convert_jax_model_to_pytorch.py --checkpoint_dir /path/to/checkpoint --output_path /path/to/output
+    python examples/convert_jax_model_to_pytorch.py --checkpoint-dir /path/to/checkpoint --config-name pi05_droid --output-path /path/to/output
 
 Example:
     # pi0_droid
-    python examples/convert_jax_model_to_pytorch.py --checkpoint_dir /home/$USER/.cache/openpi/openpi-assets/checkpoints/pi0_droid --output_path /home/$USER/.cache/openpi/openpi-assets/checkpoints/pi0_droid_pytorch
+    python examples/convert_jax_model_to_pytorch.py --checkpoint-dir /home/$USER/.cache/openpi/openpi-assets/checkpoints/pi0_droid --config-name pi0_droid --output-path /home/$USER/.cache/openpi/openpi-assets/checkpoints/pi0_droid_pytorch
 
     # pi0_aloha_sim
-    python examples/convert_jax_model_to_pytorch.py --checkpoint_dir /home/$USER/.cache/openpi/openpi-assets/checkpoints/pi0_aloha_sim --output_path /home/$USER/.cache/openpi/openpi-assets/checkpoints/pi0_aloha_sim_pytorch
+    python examples/convert_jax_model_to_pytorch.py --checkpoint-dir /home/$USER/.cache/openpi/openpi-assets/checkpoints/pi0_aloha_sim --config-name pi0_aloha_sim --output-path /home/$USER/.cache/openpi/openpi-assets/checkpoints/pi0_aloha_sim_pytorch
 
     # pi05_droid
-    python examples/convert_jax_model_to_pytorch.py --checkpoint_dir /home/$USER/.cache/openpi/openpi-assets/checkpoints/pi05_droid --output_path /home/$USER/.cache/openpi/openpi-assets/checkpoints/pi05_droid_pytorch
+    python examples/convert_jax_model_to_pytorch.py --checkpoint-dir /home/$USER/.cache/openpi/openpi-assets/checkpoints/pi05_droid --config-name pi05_droid --output-path /home/$USER/.cache/openpi/openpi-assets/checkpoints/pi05_droid_pytorch
 """
 
 import json
@@ -533,7 +531,7 @@ def convert_pi0_checkpoint(
     safetensors.torch.save_model(pi0_model, os.path.join(output_path, "model.safetensors"))
 
     # Copy assets folder if it exists
-    assets_source = pathlib.Path(checkpoint_dir).parent / "assets"
+    assets_source = pathlib.Path(checkpoint_dir) / "assets"
     if assets_source.exists():
         assets_dest = pathlib.Path(output_path) / "assets"
         if assets_dest.exists():
