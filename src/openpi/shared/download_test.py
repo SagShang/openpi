@@ -52,3 +52,22 @@ def test_download_fsspec():
 
     new_local_path = download.maybe_download(remote_path, gs={"token": "anon"})
     assert new_local_path == local_path
+
+
+def test_download_uses_symlinked_cache_path():
+    cache_dir = download.get_cache_dir()
+    target_dir = cache_dir.parent / "symlink_target"
+    target_dir.mkdir(exist_ok=True)
+
+    linked_parent = cache_dir / "openpi-assets"
+    linked_parent.mkdir(exist_ok=True)
+    (linked_parent / "checkpoints").symlink_to(target_dir, target_is_directory=True)
+
+    cached_path = linked_parent / "checkpoints" / "pi05_base" / "assets" / "franka"
+    cached_path.mkdir(parents=True)
+    (cached_path / "norm_stats.json").write_text("{}")
+
+    result = download.maybe_download("gs://openpi-assets/checkpoints/pi05_base/assets/franka")
+
+    assert result == cached_path
+    assert result.exists()

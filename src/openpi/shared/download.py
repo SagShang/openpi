@@ -57,8 +57,9 @@ def maybe_download(url: str, *, force_download: bool = False, **kwargs) -> pathl
 
     cache_dir = get_cache_dir()
 
+    # Keep cache paths lexical so symlinked subdirectories under the cache root still
+    # compare as children of cache_dir in invalidation and permission helpers.
     local_path = cache_dir / parsed.netloc / parsed.path.strip("/")
-    local_path = local_path.resolve()
 
     # Check if the cache should be invalidated.
     invalidate_cache = False
