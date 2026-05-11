@@ -24,8 +24,6 @@ class Pi0Config(_model.BaseModelConfig):
     # Set the model specific defaults.
     action_dim: int = 32
     action_horizon: int = 50
-    # If set, only the first N action dimensions contribute to the flow-matching loss.
-    loss_action_dim: int | None = None
     max_token_len: int = None  # type: ignore
     # Pi05 has two differences from Pi0:
     # - the state input is part of the discrete language tokens rather than a continuous input that is part of the suffix

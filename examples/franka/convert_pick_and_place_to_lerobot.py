@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 import random
 import shutil
+from typing import Literal
 
 import cv2
 from lerobot.common.datasets.lerobot_dataset import HF_LEROBOT_HOME
@@ -63,10 +64,27 @@ def _load_samples(samples_path: Path) -> list[dict]:
     return samples
 
 
-def _state_from_sample(sample: dict, *, gripper_max_angle: float) -> np.ndarray:
+GripperMode = Literal["binary", "scaled", "raw"]
+
+
+def _state_from_sample(
+    sample: dict,
+    *,
+    gripper_mode: GripperMode,
+    gripper_close_threshold: float,
+    gripper_max_angle: float,
+) -> np.ndarray:
     joints = np.asarray(sample["robot_state"]["position"], dtype=np.float32)
-    gripper = np.asarray(sample["gripper_position"], dtype=np.float32) / np.float32(gripper_max_angle)
-    gripper = np.clip(gripper, 0.0, 1.0)
+    raw_gripper = np.asarray(sample["gripper_position"], dtype=np.float32)
+    if gripper_mode == "binary":
+        # OpenPI Franka/DROID convention: 0.0 is open and 1.0 is closed.
+        gripper = (raw_gripper >= np.float32(gripper_close_threshold)).astype(np.float32)
+    elif gripper_mode == "scaled":
+        gripper = np.clip(raw_gripper / np.float32(gripper_max_angle), 0.0, 1.0)
+    elif gripper_mode == "raw":
+        gripper = raw_gripper
+    else:
+        raise ValueError(f"Unsupported gripper_mode: {gripper_mode}")
     if joints.shape != (7,):
         raise ValueError(f"Expected 7 joint positions, got {joints.shape}")
     if gripper.shape != (1,):
@@ -142,6 +160,8 @@ def main(
     repo_id: str = "pick_and_place_franka",
     task: str | None = None,
     fps: int = 60,
+    gripper_mode: GripperMode = "binary",
+    gripper_close_threshold: float = 0.1,
     gripper_max_angle: float = 0.8,
     prompt_seed: int = 42,
     randomize_prompts: bool = True,
@@ -181,7 +201,15 @@ def main(
             episode_task = rng.choice(DEFAULT_TASK_PROMPTS)
         else:
             episode_task = _task_from_episode(ep_dir)
-        states = [_state_from_sample(sample, gripper_max_angle=gripper_max_angle) for sample in samples]
+        states = [
+            _state_from_sample(
+                sample,
+                gripper_mode=gripper_mode,
+                gripper_close_threshold=gripper_close_threshold,
+                gripper_max_angle=gripper_max_angle,
+            )
+            for sample in samples
+        ]
 
         for frame_index in range(len(samples) - 1):
             dataset.add_frame(
