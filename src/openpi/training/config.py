@@ -969,9 +969,9 @@ _CONFIGS = [
     ),
     TrainConfig(
         name="pi05_franka_pick_and_place_full",
-        model=pi0_config.Pi0Config(pi05=True, action_horizon=60),
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=20),
         data=LeRobotFrankaDataConfig(
-            repo_id="pick_and_place_franka",
+            repo_id="pick_and_place_blue_cube_20hz",
             base_config=DataConfig(prompt_from_task=True),
             num_arms=1,
             control_mode="joint",
@@ -1002,60 +1002,7 @@ _CONFIGS = [
         optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
         num_train_steps=30_000,
         batch_size=32,
-        save_interval=1_000,
-        keep_period=1_000,
         fsdp_devices=4,
-    ),
-    TrainConfig(
-        name="pi05_franka_pick_and_place_lora",
-        model=pi0_config.Pi0Config(
-            pi05=True,
-            action_horizon=60,
-            paligemma_variant="gemma_2b_lora",
-            action_expert_variant="gemma_300m_lora",
-        ),
-        data=LeRobotFrankaDataConfig(
-            repo_id="pick_and_place_franka",
-            base_config=DataConfig(prompt_from_task=True),
-            num_arms=1,
-            control_mode="joint",
-            use_delta_actions=True,
-            repack_transforms=_transforms.Group(
-                inputs=[
-                    _transforms.RepackTransform(
-                        {
-                            "images": {
-                                "cam_high": "observation.images.cam_high",
-                                "cam_wrist": "observation.images.cam_wrist",
-                            },
-                            "state": "observation.state",
-                            "actions": "action",
-                            "prompt": "prompt",
-                        }
-                    )
-                ]
-            ),
-        ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
-        lr_schedule=_optimizer.CosineDecaySchedule(
-            warmup_steps=10_000,
-            peak_lr=5e-5,
-            decay_steps=1_000_000,
-            decay_lr=5e-5,
-        ),
-        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
-        freeze_filter=pi0_config.Pi0Config(
-            pi05=True,
-            action_horizon=60,
-            paligemma_variant="gemma_2b_lora",
-            action_expert_variant="gemma_300m_lora",
-        ).get_freeze_filter(),
-        ema_decay=None,
-        num_train_steps=30_000,
-        batch_size=128,
-        save_interval=1_000,
-        keep_period=1_000,
-        fsdp_devices=1,
     ),
     #
     # Fine-tuning DROID configs.
