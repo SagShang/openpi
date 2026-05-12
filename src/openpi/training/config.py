@@ -969,7 +969,7 @@ _CONFIGS = [
     ),
     TrainConfig(
         name="pi05_franka_pick_and_place_full",
-        model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False),
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=60),
         data=LeRobotFrankaDataConfig(
             repo_id="pick_and_place_franka",
             base_config=DataConfig(prompt_from_task=True),
@@ -1010,8 +1010,7 @@ _CONFIGS = [
         name="pi05_franka_pick_and_place_lora",
         model=pi0_config.Pi0Config(
             pi05=True,
-            action_horizon=10,
-            discrete_state_input=False,
+            action_horizon=60,
             paligemma_variant="gemma_2b_lora",
             action_expert_variant="gemma_300m_lora",
         ),
@@ -1047,8 +1046,7 @@ _CONFIGS = [
         optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
         freeze_filter=pi0_config.Pi0Config(
             pi05=True,
-            action_horizon=10,
-            discrete_state_input=False,
+            action_horizon=60,
             paligemma_variant="gemma_2b_lora",
             action_expert_variant="gemma_300m_lora",
         ).get_freeze_filter(),
@@ -1057,7 +1055,7 @@ _CONFIGS = [
         batch_size=128,
         save_interval=1_000,
         keep_period=1_000,
-        fsdp_devices=4,
+        fsdp_devices=1,
     ),
     #
     # Fine-tuning DROID configs.

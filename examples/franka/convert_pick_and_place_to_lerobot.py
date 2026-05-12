@@ -3,12 +3,13 @@
 Example:
 uv run examples/franka/convert_pick_and_place_to_lerobot.py \
     --raw-dir /home/wentao/openpi/data/datasets/pick_and_place_origin \
-    --repo-id pick_and_place_franka \
+    --repo-id pick_and_place_franka_10hz \
     --task "pick and place the block"
 """
 
 from __future__ import annotations
 
+from itertools import pairwise
 import json
 from pathlib import Path
 import random
@@ -21,7 +22,6 @@ from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 import numpy as np
 import tqdm
 import tyro
-
 
 JOINT_NAMES = (
     "fr3_joint1",
@@ -64,6 +64,26 @@ def _load_samples(samples_path: Path) -> list[dict]:
     return samples
 
 
+def _downsample_indices(num_samples: int, *, source_fps: int, target_fps: int) -> list[int]:
+    if target_fps <= 0:
+        raise ValueError(f"target fps must be positive, got {target_fps}")
+    if source_fps <= 0:
+        raise ValueError(f"source fps must be positive, got {source_fps}")
+    if source_fps % target_fps != 0:
+        raise ValueError(
+            f"source fps ({source_fps}) must be an integer multiple of target fps ({target_fps})"
+        )
+
+    stride = source_fps // target_fps
+    indices = list(range(0, num_samples, stride))
+    if len(indices) < 2:
+        raise ValueError(
+            f"Episode has too few samples ({num_samples}) after downsampling "
+            f"from {source_fps}Hz to {target_fps}Hz"
+        )
+    return indices
+
+
 GripperMode = Literal["binary", "scaled", "raw"]
 
 
@@ -93,6 +113,7 @@ def _state_from_sample(
 
 
 def _read_rgb(cap: cv2.VideoCapture, video_path: Path, frame_index: int) -> np.ndarray:
+    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
     ok, frame = cap.read()
     if not ok:
         raise RuntimeError(f"Failed to read frame {frame_index} from {video_path}")
@@ -157,15 +178,16 @@ def _create_dataset(repo_id: str, fps: int, *, overwrite: bool) -> LeRobotDatase
 
 def main(
     raw_dir: Path = Path("/home/wentao/openpi/data/datasets/pick_and_place_origin"),
-    repo_id: str = "pick_and_place_franka",
+    repo_id: str = "pick_and_place_franka_10hz",
     task: str | None = None,
-    fps: int = 60,
+    fps: int = 10,
+    source_fps: int = 60,
     gripper_mode: GripperMode = "binary",
     gripper_close_threshold: float = 0.1,
     gripper_max_angle: float = 0.8,
     prompt_seed: int = 42,
-    randomize_prompts: bool = True,
     *,
+    randomize_prompts: bool = True,
     overwrite: bool = True,
 ) -> None:
     dataset = _create_dataset(repo_id, fps, overwrite=overwrite)
@@ -210,12 +232,13 @@ def main(
             )
             for sample in samples
         ]
+        sample_indices = _downsample_indices(len(samples), source_fps=source_fps, target_fps=fps)
 
-        for frame_index in range(len(samples) - 1):
+        for frame_index, next_frame_index in pairwise(sample_indices):
             dataset.add_frame(
                 {
                     "observation.state": states[frame_index],
-                    "action": states[frame_index + 1],
+                    "action": states[next_frame_index],
                     "observation.images.cam_high": _read_rgb(base_cap, base_path, frame_index),
                     "observation.images.cam_wrist": _read_rgb(wrist_cap, wrist_path, frame_index),
                     "task": episode_task,
@@ -225,10 +248,13 @@ def main(
         base_cap.release()
         wrist_cap.release()
         dataset.save_episode()
-        total_frames += len(samples) - 1
+        total_frames += len(sample_indices) - 1
 
     dataset.stop_image_writer()
-    print(f"Wrote {len(episode_dirs)} episodes / {total_frames} frames to {HF_LEROBOT_HOME / repo_id}")
+    print(
+        f"Wrote {len(episode_dirs)} episodes / {total_frames} frames "
+        f"at {fps}Hz to {HF_LEROBOT_HOME / repo_id}"
+    )
 
 
 if __name__ == "__main__":
