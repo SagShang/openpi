@@ -65,9 +65,19 @@ class Policy(BasePolicy):
             self._rng = rng or jax.random.key(0)
 
     @override
-    def infer(self, obs: dict, *, noise: np.ndarray | None = None) -> dict:  # type: ignore[misc]
+    def infer(  # type: ignore[misc]
+        self,
+        obs: dict,
+        *,
+        noise: np.ndarray | None = None,
+        sample_kwargs: dict[str, Any] | None = None,
+        return_model_actions: bool = False,
+    ) -> dict:
         # Make a copy since transformations may modify the inputs in place.
         inputs = jax.tree.map(lambda x: x, obs)
+        inputs.pop("_reset", None)
+        inputs.pop("reset", None)
+        inputs.pop("episode_reset", None)
         inputs = self._input_transform(inputs)
         if not self._is_pytorch_model:
             # Make a batch and convert to jax.Array.
@@ -79,7 +89,7 @@ class Policy(BasePolicy):
             sample_rng_or_pytorch_device = self._pytorch_device
 
         # Prepare kwargs for sample_actions
-        sample_kwargs = dict(self._sample_kwargs)
+        sample_kwargs = {**self._sample_kwargs, **(sample_kwargs or {})}
         if noise is not None:
             noise = torch.from_numpy(noise).to(self._pytorch_device) if self._is_pytorch_model else jnp.asarray(noise)
 
@@ -89,17 +99,22 @@ class Policy(BasePolicy):
 
         observation = _model.Observation.from_dict(inputs)
         start_time = time.monotonic()
+        model_actions = self._sample_actions(sample_rng_or_pytorch_device, observation, **sample_kwargs)
         outputs = {
             "state": inputs["state"],
-            "actions": self._sample_actions(sample_rng_or_pytorch_device, observation, **sample_kwargs),
+            "actions": model_actions,
         }
         model_time = time.monotonic() - start_time
         if self._is_pytorch_model:
             outputs = jax.tree.map(lambda x: np.asarray(x[0, ...].detach().cpu()), outputs)
+            model_actions = np.asarray(model_actions[0, ...].detach().cpu())
         else:
             outputs = jax.tree.map(lambda x: np.asarray(x[0, ...]), outputs)
+            model_actions = np.asarray(model_actions[0, ...])
 
         outputs = self._output_transform(outputs)
+        if return_model_actions:
+            outputs["model_actions"] = model_actions
         outputs["policy_timing"] = {
             "infer_ms": model_time * 1000,
         }

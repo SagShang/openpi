@@ -7,6 +7,7 @@ import tyro
 
 from openpi.policies import policy as _policy
 from openpi.policies import policy_config as _policy_config
+from openpi.policies import realtime_chunking_policy as _rtc_policy
 from openpi.serving import websocket_policy_server
 from openpi.training import config as _config
 
@@ -50,6 +51,23 @@ class Args:
     port: int = 8000
     # Record the policy's behavior for debugging.
     record: bool = False
+
+    # Enable real-time chunking (RTC) to stitch consecutive action chunks together.
+    rtc: bool = False
+    # Number of actions the robot executes from each returned chunk before asking for a new one.
+    rtc_execute_horizon: int = 4
+    # Number of actions already committed while a new policy request is in flight.
+    rtc_inference_delay: int = 0
+    # How far into the new chunk to bias toward the shifted previous plan. Defaults to
+    # action_horizon - rtc_execute_horizon once the first chunk shape is known.
+    rtc_prefix_attention_horizon: int | None = None
+    # Prefix weighting schedule from the RTC reference implementation.
+    rtc_schedule: _rtc_policy.PrefixSchedule = "exp"
+    # Maximum RTC guidance weight used by JAX pi0/pi0.5 model-internal RTC.
+    rtc_max_guidance_weight: float = 5.0
+    # Trim chunk-like outputs to this horizon. Set this to rtc_execute_horizon when the robot client
+    # executes all returned actions before re-querying.
+    rtc_return_horizon: int | None = None
 
     # Specifies how to load the policy. If not provided, the default policy for the environment will be used.
     policy: Checkpoint | Default = dataclasses.field(default_factory=Default)
@@ -98,7 +116,20 @@ def create_policy(args: Args) -> _policy.Policy:
 
 def main(args: Args) -> None:
     policy = create_policy(args)
-    policy_metadata = policy.metadata
+    policy_metadata = dict(policy.metadata)
+
+    if args.rtc:
+        rtc_config = _rtc_policy.RealtimeChunkingConfig(
+            execute_horizon=args.rtc_execute_horizon,
+            inference_delay=args.rtc_inference_delay,
+            prefix_attention_horizon=args.rtc_prefix_attention_horizon,
+            schedule=args.rtc_schedule,
+            max_guidance_weight=args.rtc_max_guidance_weight,
+            return_horizon=args.rtc_return_horizon,
+        )
+        policy = _rtc_policy.RealtimeChunkingPolicy(policy, rtc_config)
+        policy_metadata["rtc"] = dataclasses.asdict(rtc_config)
+        logging.info("RTC enabled: %s", policy_metadata["rtc"])
 
     # Record the policy's behavior.
     if args.record:
