@@ -221,11 +221,6 @@ class Pi0(_model.BaseModel):
         *,
         num_steps: int | at.Int[at.Array, ""] = 10,
         noise: at.Float[at.Array, "b ah ad"] | None = None,
-        prev_actions: at.Float[at.Array, "b ah ad"] | None = None,
-        rtc_inference_delay: int | at.Int[at.Array, ""] = 0,
-        rtc_prefix_attention_horizon: int | at.Int[at.Array, ""] | None = None,
-        rtc_schedule_id: int | at.Int[at.Array, ""] = 1,
-        rtc_max_guidance_weight: float | at.Float[at.Array, ""] = 5.0,
     ) -> _model.Actions:
         observation = _model.preprocess_observation(None, observation, train=False)
         # note that we use the convention more common in diffusion literature, where t=1 is noise and t=0 is the target
@@ -241,7 +236,8 @@ class Pi0(_model.BaseModel):
         positions = jnp.cumsum(prefix_mask, axis=1) - 1
         _, kv_cache = self.PaliGemma.llm([prefix_tokens, None], mask=prefix_attn_mask, positions=positions)
 
-        def denoise(x_t, time):
+        def step(carry):
+            x_t, time = carry
             suffix_tokens, suffix_mask, suffix_ar_mask, adarms_cond = self.embed_suffix(
                 observation, x_t, jnp.broadcast_to(time, batch_size)
             )
@@ -270,32 +266,7 @@ class Pi0(_model.BaseModel):
                 adarms_cond=[None, adarms_cond],
             )
             assert prefix_out is None
-            return self.action_out_proj(suffix_out[:, -self.action_horizon :])
-
-        def step(carry):
-            x_t, time = carry
-            if prev_actions is not None:
-                def denoiser(x):
-                    v = denoise(x, time)
-                    return x - time * v, v
-
-                x_0_estimate, vjp_fn, v_t = jax.vjp(denoiser, x_t, has_aux=True)
-                weights = _get_prefix_weights(
-                    rtc_inference_delay,
-                    self.action_horizon if rtc_prefix_attention_horizon is None else rtc_prefix_attention_horizon,
-                    self.action_horizon,
-                    rtc_schedule_id,
-                )
-                error = (prev_actions - x_0_estimate) * weights[None, :, None]
-                pinv_correction = vjp_fn(error)[0]
-                inv_r2 = (time**2 + (1 - time) ** 2) / (time**2)
-                guidance_weight = jnp.minimum(
-                    jnp.nan_to_num((time / (1 - time)) * inv_r2, posinf=rtc_max_guidance_weight),
-                    rtc_max_guidance_weight,
-                )
-                v_t = v_t - guidance_weight * pinv_correction
-            else:
-                v_t = denoise(x_t, time)
+            v_t = self.action_out_proj(suffix_out[:, -self.action_horizon :])
 
             return x_t + dt * v_t, time + dt
 
@@ -306,25 +277,3 @@ class Pi0(_model.BaseModel):
 
         x_0, _ = jax.lax.while_loop(cond, step, (noise, 1.0))
         return x_0
-
-
-def _get_prefix_weights(start: int, end: int, total: int, schedule_id: int) -> jax.Array:
-    start = jnp.minimum(start, end)
-    positions = jnp.arange(total)
-
-    def linear_weights():
-        return jnp.clip((start - 1 - positions) / (end - start + 1) + 1, 0, 1)
-
-    def exp_weights():
-        weights = jnp.clip((start - 1 - positions) / (end - start + 1) + 1, 0, 1)
-        return weights * jnp.expm1(weights) / (jnp.e - 1)
-
-    def ones_weights():
-        return jnp.where(positions >= end, 0, jnp.ones(total))
-
-    def zeros_weights():
-        weights = (positions < start).astype(jnp.float32)
-        return jnp.where(positions >= end, 0, weights)
-
-    weights = jax.lax.switch(schedule_id, (linear_weights, exp_weights, ones_weights, zeros_weights))
-    return jnp.where(positions >= end, 0, weights)
