@@ -969,9 +969,9 @@ _CONFIGS = [
     ),
     TrainConfig(
         name="pi05_franka_pick_and_place_full",
-        model=pi0_config.Pi0Config(pi05=True, action_horizon=16),
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=16, discrete_state_input=True),
         data=LeRobotFrankaDataConfig(
-            repo_id="pick_and_place_blue_cube_lerobot",
+            repo_id="pick_and_place_cube_10hz_lerobot",
             base_config=DataConfig(prompt_from_task=True),
             num_arms=1,
             control_mode="joint",
